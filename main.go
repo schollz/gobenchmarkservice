@@ -1,0 +1,361 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"crypto/md5"
+	"encoding/hex"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io/ioutil"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"time"
+
+	log "github.com/cihub/seelog"
+	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis"
+	"github.com/pkg/errors"
+)
+
+const (
+	// maxRunTime is the maximum amount of time to run a benchmark
+	maxRunTime = 10 * time.Second
+)
+
+// redisClient is for handling the communication and cacheing the results
+var redisClient *redis.Client
+
+// Program is the code and metadata and finished benchmarks for a program.
+// This will be stored in the keystore using its hash as the key.
+type Program struct {
+	Created    time.Time       `json:"created,omitempty"`
+	Code       string          `json:"code" binding:"required"`
+	Hash       string          `json:"hash"`
+	Benchmarks []BenchmarkCode `json:"benchmarks,omitempty"`
+}
+
+// BenchmarkCode contains the system info, the program hash, the meta data, and the
+// benchmark results.
+type BenchmarkCode struct {
+	ProgramHash string    `json:"program_hash"`
+	Created     time.Time `json:"created"`
+	OS          string    `json:"os"`
+	Arch        string    `json:"arch"`
+	Cores       int       `json:"cores"`
+	Result      string    `json:"result"`
+}
+
+// NewBenchmark will do a new benchmark
+func NewBenchmark(code string) (bc BenchmarkCode, err error) {
+	result, err := DoBenchmark(code)
+	bc = BenchmarkCode{
+		Created: time.Now(),
+		OS:      runtime.GOOS,
+		Arch:    runtime.GOARCH,
+		Cores:   runtime.NumCPU(),
+		Result:  result,
+	}
+	return
+}
+
+// DoBenchmark will create a temporary directory with the code
+// and run the tests and return the output.
+func DoBenchmark(code string) (result string, err error) {
+	// TODO: before running benchmark, make sure to import third-party packages
+	content := []byte(code)
+	dir, err := ioutil.TempDir("", "example")
+	if err != nil {
+		return
+	}
+
+	defer os.RemoveAll(dir) // clean up
+
+	// create the temp directory
+	tmpfn := filepath.Join(dir, "tmpfile_test.go")
+	if err = ioutil.WriteFile(tmpfn, content, 0666); err != nil {
+		return
+	}
+
+	// enter the temp directory
+	os.Chdir(dir)
+	defer os.Chdir("..")
+
+	ctx, cancel := context.WithTimeout(context.Background(), maxRunTime)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "go", "test", "-bench=.")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			err = fmt.Errorf("process took too long")
+		}
+		if _, ok := err.(*exec.ExitError); !ok {
+			err = fmt.Errorf("error running sandbox: %v", err)
+		}
+	}
+	if err != nil {
+		return "", errors.Wrap(err, "problem running test")
+	}
+
+	result = string(stderr.Bytes())
+	if result == "" {
+		result = string(stdout.Bytes())
+	}
+	return
+}
+
+func init() {
+	SetLogLevel("debug")
+}
+
+func main() {
+	var isClient bool
+	var redisServer string
+	flag.StringVar(&redisServer, "redis", "localhost:6374", "address of redis")
+	flag.BoolVar(&isClient, "client", false, "is client")
+	flag.Parse()
+
+	// initiate redis
+	redisClient = redis.NewClient(&redis.Options{
+		Addr:     redisServer,
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
+	// make sure redis is up
+	_, err := redisClient.Ping().Result()
+	if err != nil {
+		log.Errorf("can't start, bad connection to redis: ", err)
+		return
+	}
+
+	if isClient {
+		startClient()
+	} else {
+		startServer()
+	}
+}
+
+// startServer will start a server to listen for HTTP requests (for someone posting a new benchmark job)
+// and will listen to the redis channel for finished jobs
+func startServer() {
+	// goroutien to listen for finished jobs
+	go func() {
+		pubsub := redisClient.Subscribe("finished")
+		defer pubsub.Close()
+
+		// Wait for subscription to be created before publishing message.
+		subscr, err := pubsub.ReceiveTimeout(time.Second)
+		if err != nil {
+			panic(err)
+		}
+		log.Debug(subscr)
+
+		for {
+			msg, err := pubsub.ReceiveMessage()
+			if err != nil {
+				log.Error(err)
+				continue
+			}
+
+			// get the result
+			var bc BenchmarkCode
+			err = json.Unmarshal([]byte(msg.Payload), &bc)
+			if err != nil {
+				log.Error(err)
+				continue
+			}
+
+			// get the program that created the result
+			var p Program
+			err = redisGet(bc.ProgramHash, &p)
+			if err != nil {
+				log.Error(err)
+				continue
+			}
+
+			// add the result to the program cache
+			p.Benchmarks = append(p.Benchmarks, bc)
+			err = redisSet(bc.ProgramHash, p)
+			if err != nil {
+				log.Warn(err)
+			}
+			log.Debug(msg.Channel, msg.Payload)
+		}
+	}()
+
+	// start the server for handling POST benchmarks
+	gin.SetMode(gin.ReleaseMode)
+	router := gin.Default()
+	router.MaxMultipartMemory = 8 << 20 // 8 MiB
+	router.Static("/", "./public")
+	router.POST("/benchmark", func(c *gin.Context) {
+		// This route handles submitting new benchmarks and retrieving old results.
+		// Basically, if there are no results then it will submit the benchmark as a new one.
+		// Code is hashed so that the same code will always retrieve the same benchmarks.
+		err := func(c *gin.Context) (err error) {
+			var p Program
+			err = c.BindJSON(&p)
+			if err != nil {
+				log.Warn(err)
+				return
+			}
+
+			// TODO: do something to sanitize the code (e.g. go fmt -s -w)
+
+			hasher := md5.New()
+			hasher.Write([]byte(p.Code))
+			p.Hash = hex.EncodeToString(hasher.Sum(nil))
+
+			// check to see if the benchmarks are done
+			err = redisGet(p.Hash, &p)
+			if err == nil {
+				if len(p.Benchmarks) > 0 {
+					c.JSON(200, gin.H{"success": true, "message": "got benchmarks", "benchmarks": p.Benchmarks})
+					return
+				}
+			}
+
+			// add the creation time
+			p.Created = time.Now()
+			bP, err := json.Marshal(p)
+			if err != nil {
+				return
+			}
+
+			// add to the results
+			var foo Program
+			err = redisGet(p.Hash, &foo)
+			if err != nil {
+				redisSet(p.Hash, p)
+			}
+
+			// publish code to new jobs
+			err = redisClient.Publish("newjob", string(bP)).Err()
+			if err == nil {
+				log.Debugf("added job %s", p.Hash)
+				c.JSON(200, gin.H{"success": true, "message": "submitted benchmarks"})
+			}
+			return
+		}(c)
+		if err != nil {
+			c.JSON(200, gin.H{"success": false, "message": err.Error()})
+		}
+	})
+	router.Run(":8080")
+}
+
+// startClient will simply listen for jobs and complete them.
+func startClient() {
+	pubsub := redisClient.Subscribe("newjob")
+	defer pubsub.Close()
+
+	// Wait for subscription to be created before publishing message.
+	subscr, err := pubsub.ReceiveTimeout(time.Second)
+	if err != nil {
+		panic(err)
+	}
+	log.Debug(subscr)
+
+	for {
+		msg, err := pubsub.ReceiveMessage()
+		if err != nil {
+			log.Error(err)
+			continue
+		}
+
+		log.Debug(msg.Channel, msg.Payload)
+
+		// get the new program that needs benchmarking
+		var p Program
+		err = json.Unmarshal([]byte(msg.Payload), &p)
+		if err != nil {
+			log.Error(err)
+			continue
+		}
+
+		// TODO: check to see if this particular machine has already benchmarked this program
+		// TODO: check to see how old this job is (if a previous job was taking awhile, it could be tens of seconds
+		// before getting to this one), and discard it if it is too old
+
+		// benchmark the code
+		bc, err := NewBenchmark(p.Code)
+		if err != nil {
+			log.Warn(err)
+			continue
+		}
+		bc.ProgramHash = p.Hash
+
+		// publish code to new jobs
+		bcBytes, _ := json.Marshal(bc)
+		err = redisClient.Publish("finished", string(bcBytes)).Err()
+		if err != nil {
+			log.Warn(err)
+		}
+
+		log.Debugf("finished job %s", bc.ProgramHash)
+	}
+}
+
+// SetLogLevel determines the log level
+func SetLogLevel(level string) (err error) {
+
+	// https://en.wikipedia.org/wiki/ANSI_escape_code#3/4_bit
+	// https://github.com/cihub/seelog/wiki/Log-levels
+	appConfig := `
+	<seelog minlevel="` + level + `">
+	<outputs formatid="stdout">
+	<filter levels="debug,trace">
+		<console formatid="debug"/>
+	</filter>
+	<filter levels="info">
+		<console formatid="info"/>
+	</filter>
+	<filter levels="critical,error">
+		<console formatid="error"/>
+	</filter>
+	<filter levels="warn">
+		<console formatid="warn"/>
+	</filter>
+	</outputs>
+	<formats>
+		<format id="stdout"   format="%Date %Time [%LEVEL] %File %FuncShort:%Line %Msg %n" />
+		<format id="debug"   format="%Date %Time %EscM(37)[%LEVEL]%EscM(0) %File %FuncShort:%Line %Msg %n" />
+		<format id="info"    format="%Date %Time %EscM(36)[%LEVEL]%EscM(0) %File %FuncShort:%Line %Msg %n" />
+		<format id="warn"    format="%Date %Time %EscM(33)[%LEVEL]%EscM(0) %File %FuncShort:%Line %Msg %n" />
+		<format id="error"   format="%Date %Time %EscM(31)[%LEVEL]%EscM(0) %File %FuncShort:%Line %Msg %n" />
+	</formats>
+	</seelog>
+	`
+	logger, err := log.LoggerFromConfigAsBytes([]byte(appConfig))
+	if err != nil {
+		return
+	}
+	log.ReplaceLogger(logger)
+	return
+}
+
+// redisSet is helper for the redis key store
+func redisSet(key string, value interface{}) (err error) {
+	b, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+
+	err = redisClient.Set(key, string(b), 0).Err()
+	return
+}
+
+// redisGet is helper for the redis key store, returns an error
+// if the value is not found.
+func redisGet(key string, value interface{}) (err error) {
+	valueString, err := redisClient.Get(key).Result()
+	if err != nil {
+		return
+	}
+	return json.Unmarshal([]byte(valueString), &value)
+}
