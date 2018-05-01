@@ -8,11 +8,14 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"go/parser"
+	"go/token"
 	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	log "github.com/cihub/seelog"
@@ -43,6 +46,7 @@ type Program struct {
 type BenchmarkCode struct {
 	ProgramHash string    `json:"program_hash"`
 	Created     time.Time `json:"created"`
+	GoVersion   string    `json:"go_version"`
 	OS          string    `json:"os"`
 	Arch        string    `json:"arch"`
 	Cores       int       `json:"cores"`
@@ -53,58 +57,12 @@ type BenchmarkCode struct {
 func NewBenchmark(code string) (bc BenchmarkCode, err error) {
 	result, err := DoBenchmark(code)
 	bc = BenchmarkCode{
-		Created: time.Now(),
-		OS:      runtime.GOOS,
-		Arch:    runtime.GOARCH,
-		Cores:   runtime.NumCPU(),
-		Result:  result,
-	}
-	return
-}
-
-// DoBenchmark will create a temporary directory with the code
-// and run the tests and return the output.
-func DoBenchmark(code string) (result string, err error) {
-	// TODO: before running benchmark, make sure to import third-party packages
-	content := []byte(code)
-	dir, err := ioutil.TempDir("", "example")
-	if err != nil {
-		return
-	}
-
-	defer os.RemoveAll(dir) // clean up
-
-	// create the temp directory
-	tmpfn := filepath.Join(dir, "tmpfile_test.go")
-	if err = ioutil.WriteFile(tmpfn, content, 0666); err != nil {
-		return
-	}
-
-	// enter the temp directory
-	os.Chdir(dir)
-	defer os.Chdir("..")
-
-	ctx, cancel := context.WithTimeout(context.Background(), maxRunTime)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "go", "test", "-bench=.")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			err = fmt.Errorf("process took too long")
-		}
-		if _, ok := err.(*exec.ExitError); !ok {
-			err = fmt.Errorf("error running sandbox: %v", err)
-		}
-	}
-	if err != nil {
-		return "", errors.Wrap(err, "problem running test")
-	}
-
-	result = string(stderr.Bytes())
-	if result == "" {
-		result = string(stdout.Bytes())
+		Created:   time.Now(),
+		GoVersion: runtime.Version(),
+		OS:        runtime.GOOS,
+		Arch:      runtime.GOARCH,
+		Cores:     runtime.NumCPU(),
+		Result:    result,
 	}
 	return
 }
@@ -205,7 +163,7 @@ func startServer() {
 				return
 			}
 
-			// TODO: do something to sanitize the code (e.g. go fmt -s -w)
+			p.Code, err = goFmt(p.Code)
 
 			hasher := md5.New()
 			hasher.Write([]byte(p.Code))
@@ -358,4 +316,106 @@ func redisGet(key string, value interface{}) (err error) {
 		return
 	}
 	return json.Unmarshal([]byte(valueString), &value)
+}
+
+// DoBenchmark will create a temporary directory with the code
+// and run the tests and return the output.
+func DoBenchmark(code string) (result string, err error) {
+
+	// TODO: before running benchmark, make sure to import third-party packages
+	// here it would be useful to do a git clone --depth 1 on the imports so
+	// to download them faster and use less space
+	fset := token.NewFileSet() // positions are relative to fset
+	// Parse src but stop after processing the imports.
+	f, err := parser.ParseFile(fset, "", code, parser.ImportsOnly)
+	if err != nil {
+		log.Warn(err)
+		return
+	}
+	// Print the imports from the file's AST.
+	for _, s := range f.Imports {
+		log.Debug(s.Path.Value)
+	}
+
+	content := []byte(code)
+	dir, err := ioutil.TempDir("", "example")
+	if err != nil {
+		return
+	}
+
+	defer os.RemoveAll(dir) // clean up
+
+	// create the temp directory
+	tmpfn := filepath.Join(dir, "tmpfile_test.go")
+	if err = ioutil.WriteFile(tmpfn, content, 0666); err != nil {
+		return
+	}
+
+	// enter the temp directory
+	os.Chdir(dir)
+	defer os.Chdir("..")
+
+	ctx, cancel := context.WithTimeout(context.Background(), maxRunTime)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "go", "test", "-bench=.")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			err = fmt.Errorf("process took too long")
+		}
+		if _, ok := err.(*exec.ExitError); !ok {
+			err = fmt.Errorf("error running sandbox: %v", err)
+		}
+	}
+	if err != nil {
+		return "", errors.Wrap(err, "problem running test")
+	}
+
+	result = string(stderr.Bytes())
+	if result == "" {
+		result = string(stdout.Bytes())
+	}
+	return
+}
+
+func goFmt(s string) (formatted string, err error) {
+	// create a temp file
+	content := []byte(s)
+	tmpfile, err := ioutil.TempFile("", "example")
+	if err != nil {
+		return
+	}
+
+	defer os.Remove(tmpfile.Name()) // clean up
+
+	if _, err = tmpfile.Write(content); err != nil {
+		return
+	}
+	if err = tmpfile.Close(); err != nil {
+		return
+	}
+
+	// run gofmt
+	cmd := exec.Command("gofmt", "-e", "-s", "-w", tmpfile.Name())
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err = cmd.Run()
+
+	// check for errors
+	if strings.TrimSpace(string(stderr.Bytes())) != "" {
+		err = fmt.Errorf(strings.TrimSpace(string(stderr.Bytes())))
+		formatted = s
+		return
+	}
+	bFormatted, err := ioutil.ReadFile(tmpfile.Name())
+	if err != nil {
+		return
+	}
+
+	formatted = string(bFormatted)
+
+	return
 }
