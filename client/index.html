@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/codemirror@5.37.0/lib/codemirror.css"></link>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.37.0/lib/codemirror.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.37.0/mode/go/go.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.37.0/addon/edit/closebrackets.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.37.0/addon/edit/matchbrackets.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.37.0/addon/edit/matchtags.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.37.0/addon/edit/trailingspace.js"></script>
+
+  <link rel="stylesheet" type="text/css" href="style.css"></link>
+  <script src="main.js"></script>
+</head>
+
+<body>
+  <div id="input-container">
+    <h1>Input</h1>
+    <form id="code-form">
+      <button type="submit" id="submit-button">submit</button>
+      <fieldset>
+        <legend>Code</legend>
+        <textarea id="code-input" name="code"></textarea>
+      </fieldset>
+    </form>
+  </div>
+  <div id="output-container">
+    <h1>Output</h1>
+    <div id="code-output">
+      submit code with
+      <code>Shift+Enter</code>
+    </div>
+  </div>
+</body>
+
+</html>

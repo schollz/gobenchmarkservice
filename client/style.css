@@ -1,0 +1,12 @@
+body {
+  margin: 0;
+  display:flex;
+}
+
+#input-container {
+  flex-basis: 50%;
+}
+
+#output-container {
+  flex-basis: 50%;
+}
