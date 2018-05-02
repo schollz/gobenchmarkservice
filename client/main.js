@@ -33,12 +33,14 @@ async function handleSubmit(e) {
   output.innerHTML = "<progress/>";
   // TODO: use fetch below instead of this stub
   await new Promise(resolve => setTimeout(resolve, 1000));
-  /*
-const response = await fetch("http://SERVERADDRESS:8080/benchmark", {
+  console.log(JSON.stringify({'code':document.getElementById("code-input").value}));
+const response = await fetch("http://localhost:8080/benchmark", {
   method: "POST",
-  body: new FormData(document.getElementById('code-form'))
+  headers: {
+        'Content-Type': 'application/json'
+    },
+  body: JSON.stringify({'code':document.getElementById("code-input").value}),
 });
-  */
   output.innerHTML = `You entered:
 <pre>${value}</pre>
 The output was

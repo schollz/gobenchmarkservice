@@ -55,7 +55,7 @@ You can startup clients on multiple machines using the same commands.
 Try submitting a job:
 
 ```
-$ http POST SERVERADDRESS:8080/benchmark code="package main
+$ http POST localhost:8080/benchmark code="package main
 
 import (
         \"fmt\"

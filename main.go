@@ -149,8 +149,12 @@ func startServer() {
 	// start the server for handling POST benchmarks
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.Default()
+	router.Use(middleWareHandler(), gin.Recovery())
 	router.MaxMultipartMemory = 8 << 20 // 8 MiB
 	router.Static("/", "./public")
+	router.OPTIONS("/benchmark", func(c *gin.Context) {
+		c.JSON(200, gin.H{"success": true})
+	})
 	router.POST("/benchmark", func(c *gin.Context) {
 		// This route handles submitting new benchmarks and retrieving old results.
 		// Basically, if there are no results then it will submit the benchmark as a new one.
@@ -162,7 +166,7 @@ func startServer() {
 				log.Warn(err)
 				return
 			}
-
+			log.Debug(p)
 			p.Code, err = goFmt(p.Code)
 
 			hasher := md5.New()
@@ -201,6 +205,7 @@ func startServer() {
 			return
 		}(c)
 		if err != nil {
+			log.Warn(err)
 			c.JSON(200, gin.H{"success": false, "message": err.Error()})
 		}
 	})
@@ -418,4 +423,24 @@ func goFmt(s string) (formatted string, err error) {
 	formatted = string(bFormatted)
 
 	return
+}
+
+func middleWareHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		t := time.Now()
+		// Add base headers
+		addCORS(c)
+		// Run next function
+		c.Next()
+		// Log request
+		log.Infof("%v %v %v %s", c.Request.RemoteAddr, c.Request.Method, c.Request.URL, time.Since(t))
+	}
+}
+
+func addCORS(c *gin.Context) {
+	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+	c.Writer.Header().Set("Access-Control-Max-Age", "86400")
+	c.Writer.Header().Set("Access-Control-Allow-Methods", "GET")
+	c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, X-Max")
+	c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 }
