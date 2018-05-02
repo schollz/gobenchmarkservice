@@ -7,5 +7,8 @@ FROM golang:1.10-alpine3.7
 RUN echo "version1" && apk add --no-cache git mercurial \
 	&& go get -v github.com/schollz/gobenchmarkservice \
 	&& go install -v github.com/schollz/gobenchmarkservice \
-	&& apk del git mercurial
+	&& go get -v github.com/schollz/git-shallow \
+	&& go install -v github.com/schollz/git-shallow \
+	&& apk del git mercurial \
+	&& echo 'alias git=git-shallow' >> ~/.bashrc
 ENTRYPOINT gobenchmarkservice -redis $benchredis -client
