@@ -22,6 +22,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis"
 	"github.com/pkg/errors"
+	"github.com/shirou/gopsutil/cpu"
 )
 
 const (
@@ -46,6 +47,8 @@ type Program struct {
 type BenchmarkCode struct {
 	ProgramHash string    `json:"program_hash"`
 	Created     time.Time `json:"created"`
+	CPU         string    `json:"cpu"`
+	CPUMHz      float64   `json:"mhz"`
 	GoVersion   string    `json:"go_version"`
 	OS          string    `json:"os"`
 	Arch        string    `json:"arch"`
@@ -56,8 +59,8 @@ type BenchmarkCode struct {
 }
 
 func (bc BenchmarkCode) String() string {
-	s := fmt.Sprintf(`%s-%s (%s, %d cores) %s<br>`,
-		bc.OS, bc.Arch, bc.GoVersion, bc.Cores, bc.Created.Format("Mon Jan _2 15:04:05 2006"))
+	s := fmt.Sprintf(`%s<br>%s-%s (%s on %s @ %2.0f with %d cores)<br>`,
+		bc.Created.Format("Mon Jan _2 15:04:05 2006"), bc.OS, bc.Arch, bc.GoVersion, bc.CPU, bc.CPUMHz, bc.Cores)
 	if bc.Error != nil {
 		return s + "error: " + bc.Error.Error()
 	}
@@ -73,11 +76,20 @@ func (bc BenchmarkCode) String() string {
 // NewBenchmark will do a new benchmark
 func NewBenchmark(code string) (bc BenchmarkCode, err error) {
 	stdout, stderr, err := DoBenchmark(code)
+	if err != nil {
+		return
+	}
+	cpuInfo, err := cpu.Info()
+	if err != nil {
+		return
+	}
 	bc = BenchmarkCode{
 		Created:   time.Now(),
 		GoVersion: runtime.Version(),
 		OS:        runtime.GOOS,
 		Arch:      runtime.GOARCH,
+		CPU:       cpuInfo[0].ModelName,
+		CPUMHz:    cpuInfo[0].Mhz,
 		Cores:     runtime.NumCPU(),
 		Stdout:    stdout,
 		Stderr:    stderr,
