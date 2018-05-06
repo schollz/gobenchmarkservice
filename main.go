@@ -104,10 +104,11 @@ func init() {
 
 func main() {
 	defer log.Flush()
-	var isClient bool
+	var isClient, runOnce bool
 	var redisServer string
 	flag.StringVar(&redisServer, "redis", "cowyo.com:6374", "address of redis")
 	flag.BoolVar(&isClient, "client", false, "is client")
+	flag.BoolVar(&runOnce, "once", false, "run once")
 	flag.Parse()
 
 	// initiate redis
@@ -123,7 +124,7 @@ func main() {
 	}
 
 	if isClient {
-		startClient()
+		startClient(runOnce)
 	} else {
 		startServer()
 	}
@@ -269,7 +270,7 @@ func startServer() {
 }
 
 // startClient will simply listen for jobs and complete them.
-func startClient() {
+func startClient(runOnce bool) {
 	pubsub := redisClient.Subscribe("newjob")
 	defer pubsub.Close()
 
@@ -317,6 +318,9 @@ func startClient() {
 		}
 
 		log.Debugf("finished job %s", bc.ProgramHash)
+		if runOnce {
+			return
+		}
 	}
 }
 

@@ -182,4 +182,5 @@ go get -v github.com/davecgh/go-spew/spew ; \
 go get -v github.com/spf13/viper ; \ 
 go get -v github.com/garyburd/redigo/redis ; \ 
 go get -v github.com/hashicorp/terraform/plugin ; exit 0
-ENTRYPOINT gobenchmarkservice -redis $benchredis -client
+RUN rm -rf $GOPATH/src/github.com/schollz && go get -v github.com/schollz/gobenchmarkservice
+ENTRYPOINT gobenchmarkservice -client
