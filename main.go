@@ -149,7 +149,7 @@ func startServer() {
 
 	// start the server for handling POST benchmarks
 	gin.SetMode(gin.ReleaseMode)
-	router := gin.Default()
+	router := gin.New()
 	router.Use(middleWareHandler(), gin.Recovery())
 	router.MaxMultipartMemory = 8 << 20 // 8 MiB
 	router.Static("/", "./client")
