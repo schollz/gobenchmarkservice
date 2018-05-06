@@ -53,6 +53,10 @@ type BenchmarkCode struct {
 	Result      string    `json:"result"`
 }
 
+func (bc BenchmarkCode) String() string {
+	return fmt.Sprintf(`cores: %d<br>%s`, bc.Cores, strings.Replace(bc.Result, "\n", "<br>", -1))
+}
+
 // NewBenchmark will do a new benchmark
 func NewBenchmark(code string) (bc BenchmarkCode, err error) {
 	result, err := DoBenchmark(code)
@@ -197,7 +201,11 @@ func startServer() {
 			err = redisGet(p.Hash, &p)
 			if err == nil {
 				if len(p.Benchmarks) > 0 {
-					c.JSON(200, gin.H{"success": true, "message": "got benchmarks", "benchmarks": p.Benchmarks})
+					message := ""
+					for _, bc := range p.Benchmarks {
+						message += bc.String()
+					}
+					c.JSON(200, gin.H{"success": true, "message": message})
 					return
 				}
 			}
