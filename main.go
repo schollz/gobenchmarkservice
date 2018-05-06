@@ -72,6 +72,7 @@ func init() {
 }
 
 func main() {
+	defer log.Flush()
 	var isClient bool
 	var redisServer string
 	flag.StringVar(&redisServer, "redis", "localhost:6374", "address of redis")
@@ -88,7 +89,6 @@ func main() {
 	_, err := redisClient.Ping().Result()
 	if err != nil {
 		log.Errorf("can't start, bad connection to redis: ", err)
-		return
 	}
 
 	if isClient {
@@ -109,7 +109,8 @@ func startServer() {
 		// Wait for subscription to be created before publishing message.
 		subscr, err := pubsub.ReceiveTimeout(time.Second)
 		if err != nil {
-			panic(err)
+			log.Error(err)
+			return
 		}
 		log.Debug(subscr)
 
@@ -228,6 +229,7 @@ func startServer() {
 			c.JSON(200, gin.H{"success": false, "message": err.Error()})
 		}
 	})
+	log.Info("Running on :8080")
 	router.Run(":8080")
 }
 
