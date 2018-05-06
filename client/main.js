@@ -71,7 +71,7 @@ async function handleSubmit(e) {
  * @returns {Promise<string>}
  */
 async function fmt(code) {
-  const response = await fetch("http://localhost:8080/fmt", {
+  const response = await fetch("/fmt", {
     method: "POST",
     mode: "cors",
     headers: { "Content-Type": "application/json" },
@@ -86,7 +86,7 @@ async function fmt(code) {
  * @returns {Promise<object>}
  */
 async function benchmark(code) {
-  const response = await fetch("http://localhost:8080/benchmark", {
+  const response = await fetch("/run", {
     method: "POST",
     mode: "cors",
     headers: { "Content-Type": "application/json" },

@@ -50,23 +50,37 @@ type BenchmarkCode struct {
 	OS          string    `json:"os"`
 	Arch        string    `json:"arch"`
 	Cores       int       `json:"cores"`
-	Result      string    `json:"result"`
+	Stdout      string    `json:"stdout"`
+	Stderr      string    `json:"stderr"`
+	Error       error     `json:"error"`
 }
 
 func (bc BenchmarkCode) String() string {
-	return fmt.Sprintf(`cores: %d<br>%s`, bc.Cores, strings.Replace(bc.Result, "\n", "<br>", -1))
+	if bc.Error != nil {
+		return "error: " + bc.Error.Error()
+	}
+	s := fmt.Sprintf(`cores: %d<br>`, bc.Cores)
+	if bc.Stdout != "" {
+		s += "stdout:<br>" + strings.Replace(bc.Stdout, "\n", "<br>", -1)
+	}
+	if bc.Stderr != "" {
+		s += "stder:<br>" + strings.Replace(bc.Stderr, "\n", "<br>", -1)
+	}
+	return s
 }
 
 // NewBenchmark will do a new benchmark
 func NewBenchmark(code string) (bc BenchmarkCode, err error) {
-	result, err := DoBenchmark(code)
+	stdout, stderr, err := DoBenchmark(code)
 	bc = BenchmarkCode{
 		Created:   time.Now(),
 		GoVersion: runtime.Version(),
 		OS:        runtime.GOOS,
 		Arch:      runtime.GOARCH,
 		Cores:     runtime.NumCPU(),
-		Result:    result,
+		Stdout:    stdout,
+		Stderr:    stderr,
+		Error:     err,
 	}
 	return
 }
@@ -179,7 +193,7 @@ func startServer() {
 			c.JSON(200, gin.H{"success": false, "message": err.Error(), "code": ""})
 		}
 	})
-	router.POST("/benchmark", func(c *gin.Context) {
+	router.POST("/run", func(c *gin.Context) {
 		// This route handles submitting new benchmarks and retrieving old results.
 		// Basically, if there are no results then it will submit the benchmark as a new one.
 		// Code is hashed so that the same code will always retrieve the same benchmarks.
@@ -354,7 +368,7 @@ func redisGet(key string, value interface{}) (err error) {
 
 // DoBenchmark will create a temporary directory with the code
 // and run the tests and return the output.
-func DoBenchmark(code string) (result string, err error) {
+func DoBenchmark(code string) (stdoutString string, stderrString string, err error) {
 
 	// TODO: before running benchmark, make sure to import third-party packages
 	// here it would be useful to do a git clone --depth 1 on the imports so
@@ -379,8 +393,12 @@ func DoBenchmark(code string) (result string, err error) {
 
 	defer os.RemoveAll(dir) // clean up
 
+	fname := "main_test.go"
+	if strings.Contains(code, "func main()") {
+		fname = "main.go"
+	}
 	// create the temp directory
-	tmpfn := filepath.Join(dir, "tmpfile_test.go")
+	tmpfn := filepath.Join(dir, fname)
 	if err = ioutil.WriteFile(tmpfn, content, 0666); err != nil {
 		return
 	}
@@ -391,7 +409,14 @@ func DoBenchmark(code string) (result string, err error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), maxRunTime)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "go", "test", "-bench=.")
+	var cmd *exec.Cmd
+	if strings.Contains(code, "func main()") {
+		log.Debug("go run")
+		cmd = exec.CommandContext(ctx, "go", "run", "main.go")
+	} else {
+		log.Debug("go test")
+		cmd = exec.CommandContext(ctx, "go", "test", "-bench=.")
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -404,13 +429,11 @@ func DoBenchmark(code string) (result string, err error) {
 		}
 	}
 	if err != nil {
-		return "", errors.Wrap(err, "problem running test")
+		return "", "", errors.Wrap(err, "problem running")
 	}
 
-	result = string(stderr.Bytes())
-	if result == "" {
-		result = string(stdout.Bytes())
-	}
+	stderrString = string(stderr.Bytes())
+	stdoutString = string(stdout.Bytes())
 	return
 }
 
