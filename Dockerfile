@@ -5,10 +5,9 @@
 #   docker start/stop gobenchservice
 FROM golang:1.10-alpine3.7
 RUN echo "version1" && apk add --no-cache git mercurial \
-	&& go get -v github.com/schollz/gobenchmarkservice \
-	&& go install -v github.com/schollz/gobenchmarkservice \
 	&& go get -v github.com/schollz/git \
-	&& go install -v github.com/schollz/git \
-	&& apk del git mercurial 
+	&& go install -v github.com/schollz/git
 ENV PATH "$GOPATH/bin:$PATH"
+RUN go get -v github.com/schollz/gobenchmarkservice \
+	&& go install -v github.com/schollz/gobenchmarkservice
 ENTRYPOINT gobenchmarkservice -redis $benchredis -client
