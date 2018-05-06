@@ -5,11 +5,18 @@ function init() {
   const textarea = document.getElementById("code-input");
   textarea.value = `package main
 
-import "fmt"
+import (
+  "fmt"
+  "testing"
+)
 
-func main() {
-  fmt.Println("hello")
+func BenchmarkFoo(b *testing.B) {
+  for i := 0; i < b.N; i++ {
+    fmt.Sprintf("hello, world")
+  }
 }
+
+
 `;
   editor = CodeMirror.fromTextArea(textarea, {
     lineNumbers: true,
@@ -36,7 +43,7 @@ async function handleFmt(e) {
   const value = editor.getValue();
   const output = document.getElementById("code-output");
   output.innerHTML = "Fmting... <progress/>";
-  await new Promise(resolve => setTimeout(resolve, 1000));
+  await new Promise(resolve => setTimeout(resolve, 100));
   const { code, success, message } = await fmt(value);
   if (success) {
     editor.setValue(code);
@@ -52,8 +59,9 @@ async function handleSubmit(e) {
   const value = editor.getValue();
   const output = document.getElementById("code-output");
   output.innerHTML = "Submitting... <progress/>";
-  await new Promise(resolve => setTimeout(resolve, 1000));
-  const { message, success } = await benchmark(value);
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const { message, success, benchmarks } = await benchmark(value);
+  console.log(benchmarks);
   if (success) {
     output.innerHTML = `You entered:
   <pre>${value}</pre>

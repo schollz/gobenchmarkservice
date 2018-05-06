@@ -56,10 +56,11 @@ type BenchmarkCode struct {
 }
 
 func (bc BenchmarkCode) String() string {
+	s := fmt.Sprintf(`%s-%s (%s, %d cores) %s<br>`,
+		bc.OS, bc.Arch, bc.GoVersion, bc.Cores, bc.Created.Format("Mon Jan _2 15:04:05 2006"))
 	if bc.Error != nil {
-		return "error: " + bc.Error.Error()
+		return s + "error: " + bc.Error.Error()
 	}
-	s := fmt.Sprintf(`cores: %d<br>`, bc.Cores)
 	if bc.Stdout != "" {
 		s += "stdout:<br>" + strings.Replace(bc.Stdout, "\n", "<br>", -1)
 	}
@@ -219,7 +220,7 @@ func startServer() {
 					for _, bc := range p.Benchmarks {
 						message += bc.String()
 					}
-					c.JSON(200, gin.H{"success": true, "message": message})
+					c.JSON(200, gin.H{"success": true, "message": message, "benchmarks": p.Benchmarks})
 					return
 				}
 			}
@@ -369,20 +370,9 @@ func redisGet(key string, value interface{}) (err error) {
 // DoBenchmark will create a temporary directory with the code
 // and run the tests and return the output.
 func DoBenchmark(code string) (stdoutString string, stderrString string, err error) {
-
-	// TODO: before running benchmark, make sure to import third-party packages
-	// here it would be useful to do a git clone --depth 1 on the imports so
-	// to download them faster and use less space
-	fset := token.NewFileSet() // positions are relative to fset
-	// Parse src but stop after processing the imports.
-	f, err := parser.ParseFile(fset, "", code, parser.ImportsOnly)
+	err = ImportPackages(code)
 	if err != nil {
-		log.Warn(err)
 		return
-	}
-	// Print the imports from the file's AST.
-	for _, s := range f.Imports {
-		log.Debug(s.Path.Value)
 	}
 
 	content := []byte(code)
@@ -509,4 +499,44 @@ func addCORS(c *gin.Context) {
 	c.Writer.Header().Set("Access-Control-Allow-Methods", "GET")
 	c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, X-Max")
 	c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+}
+
+func ImportPackages(code string) (err error) {
+	// TODO: before running benchmark, make sure to import third-party packages
+	// here it would be useful to do a git clone --depth 1 on the imports so
+	// to download them faster and use less space
+	fset := token.NewFileSet() // positions are relative to fset
+	// Parse src but stop after processing the imports.
+	f, err := parser.ParseFile(fset, "", code, parser.ImportsOnly)
+	if err != nil {
+		log.Warn(err)
+		return
+	}
+	// Print the imports from the file's AST.
+	c := make(chan error)
+	for _, s := range f.Imports {
+		log.Debug(s.Path.Value)
+		go func(s string, c chan error) {
+			log.Debugf("go get %s", s[1:len(s)-1])
+			cmd := exec.Command("go", "get", s[1:len(s)-1])
+			var stderr bytes.Buffer
+			cmd.Stderr = &stderr
+			err = cmd.Run()
+			// check for errors from gofmt
+			if strings.TrimSpace(string(stderr.Bytes())) != "" {
+				c <- errors.Wrap(fmt.Errorf(strings.TrimSpace(string(stderr.Bytes()))), s)
+				return
+			}
+			c <- nil
+		}(s.Path.Value, c)
+	}
+
+	for i := 0; i < len(f.Imports); i++ {
+		haveErr := <-c
+		if haveErr != nil {
+			log.Warn(haveErr)
+			err = haveErr
+		}
+	}
+	return
 }
