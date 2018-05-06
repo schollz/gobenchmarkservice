@@ -28,19 +28,32 @@ func main() {
 
 async function handleSubmit(e) {
   e.preventDefault && e.preventDefault();
+  console.log(e);
+  console.log(e.explicitOriginalTarget.id)
+  var postRoute = "benchmark";
+  if (e.explicitOriginalTarget.id == "gofmt-button") {
+    postRoute = "fmt"
+  }
   const value = document.getElementById("code-input").value;
   output = document.getElementById("code-output");
   output.innerHTML = "<progress/>";
   // TODO: use fetch below instead of this stub
   await new Promise(resolve => setTimeout(resolve, 1000));
   console.log(JSON.stringify({'code':document.getElementById("code-input").value}));
-const response = await fetch("http://localhost:8080/benchmark", {
+const response = await fetch("http://localhost:8080/"+postRoute, {
   method: "POST",
+  mode: 'no-cors',
   headers: {
         'Content-Type': 'application/json'
     },
   body: JSON.stringify({'code':document.getElementById("code-input").value}),
-});
+}).then(function(response) {
+    return response.json();
+  })
+  .then(function(myJson) {
+    console.log(myJson);
+  });
+console.log(response.json());
   output.innerHTML = `You entered:
 <pre>${value}</pre>
 The output was

@@ -152,8 +152,27 @@ func startServer() {
 	router.Use(middleWareHandler(), gin.Recovery())
 	router.MaxMultipartMemory = 8 << 20 // 8 MiB
 	router.Static("/", "./public")
-	router.OPTIONS("/benchmark", func(c *gin.Context) {
-		c.JSON(200, gin.H{"success": true})
+	// router.OPTIONS("/benchmark", func(c *gin.Context) { c.String(200, "ok") })
+	// router.OPTIONS("/fmt", func(c *gin.Context) { c.String(200, "ok") })
+	router.POST("/fmt", func(c *gin.Context) {
+		err := func(c *gin.Context) (err error) {
+			var p Program
+			err = c.BindJSON(&p)
+			if err != nil {
+				log.Warn(err)
+				return
+			}
+			code, err := goFmt(p.Code, true)
+			if err != nil {
+				return
+			}
+			c.JSON(200, gin.H{"success": true, "message": "reformatted code", "code": code})
+			return
+		}(c)
+		if err != nil {
+			log.Warn(err)
+			c.JSON(200, gin.H{"success": false, "message": err.Error(), "code": ""})
+		}
 	})
 	router.POST("/benchmark", func(c *gin.Context) {
 		// This route handles submitting new benchmarks and retrieving old results.
@@ -167,7 +186,7 @@ func startServer() {
 				return
 			}
 			log.Debug(p)
-			p.Code, err = goFmt(p.Code)
+			p.Code, err = goFmt(p.Code, false)
 
 			hasher := md5.New()
 			hasher.Write([]byte(p.Code))
@@ -385,7 +404,7 @@ func DoBenchmark(code string) (result string, err error) {
 	return
 }
 
-func goFmt(s string) (formatted string, err error) {
+func goFmt(s string, doimports bool) (formatted string, err error) {
 	// create a temp file
 	content := []byte(s)
 	tmpfile, err := ioutil.TempFile("", "example")
@@ -408,20 +427,34 @@ func goFmt(s string) (formatted string, err error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err = cmd.Run()
-
-	// check for errors
+	// check for errors from gofmt
 	if strings.TrimSpace(string(stderr.Bytes())) != "" {
 		err = fmt.Errorf(strings.TrimSpace(string(stderr.Bytes())))
 		formatted = s
 		return
 	}
+
+	if doimports {
+		// run goimports
+		cmd = exec.Command("goimports", "-w", tmpfile.Name())
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err = cmd.Run()
+		// check for errors from goimports
+		if strings.TrimSpace(string(stderr.Bytes())) != "" {
+			err = fmt.Errorf(strings.TrimSpace(string(stderr.Bytes())))
+			formatted = s
+			return
+		}
+
+	}
+
 	bFormatted, err := ioutil.ReadFile(tmpfile.Name())
 	if err != nil {
 		return
 	}
 
 	formatted = string(bFormatted)
-
 	return
 }
 
