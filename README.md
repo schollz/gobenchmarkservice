@@ -20,8 +20,8 @@ Start a client:
 ```
 $ go get github.com/schollz/gobenchmarkservice
 $ cd $GOPATH/src/github.com/schollz/gobenchmarkservice
-$ go build -v
-$ ./gobenchmarkservice -client
+$ docker build -t benchservice .
+$ while true; do; docker run -t benchservice; done
 ```
 
 
