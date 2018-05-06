@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/codemirror@5.37.0/lib/codemirror.css"></link>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.37.0/lib/codemirror.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.37.0/mode/go/go.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.37.0/addon/edit/closebrackets.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.37.0/addon/edit/matchbrackets.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.37.0/addon/edit/matchtags.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.37.0/addon/edit/trailingspace.js"></script>
+
+  <link rel="stylesheet" type="text/css" href="/static/style.css"></link>
+  <script>
+let editor;
+window.onload = init;
+
+function init() {
+          const textarea = document.getElementById("code-input");
+          textarea.value = `{{if .Code}}{{.Code}}{{else}}package main
+
+import (
+  "fmt"
+  "testing"
+)
+
+func BenchmarkFoo(b *testing.B) {
+  for i := 0; i < b.N; i++ {
+    fmt.Sprintf("hello, world")
+  }
+}
+{{end}}`;
+
+
+    editor = CodeMirror.fromTextArea(textarea, {
+        lineNumbers: true,
+        mode: "javascript",
+        autofocus: true,
+        indentWithTabs: true,
+        tabSize: 2,
+        autoCloseBrackets: true,
+        matchBrackets: true,
+        mode: "text/x-go",
+        showTrailingSpace: true,
+        extraKeys: {
+            "Shift-Enter": handleSubmit,
+            "Ctrl-Space": handleFmt,
+        },
+    });
+    const form = document.getElementById("code-form");
+    form.onsubmit = handleSubmit;
+    document.getElementById("gofmt-button").onclick = handleFmt;
+}
+
+async function handleFmt(e) {
+    e && e.preventDefault && e.preventDefault();
+    const value = editor.getValue();
+    const output = document.getElementById("code-output");
+    output.innerHTML = "Fmting... <progress/>";
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const {
+        code,
+        success,
+        message
+    } = await fmt(value);
+    if (success) {
+        editor.setValue(code);
+        output.innerHTML = "<p>formated!</p>";
+    } else {
+        output.innerHTML = `<p style='color:red;'>${message}</p>`;
+    }
+    editor.focus();
+}
+
+async function handleSubmit(e) {
+    e && e.preventDefault && e.preventDefault();
+    const value = editor.getValue();
+    const output = document.getElementById("code-output");
+    output.innerHTML = "Submitting... <progress/>";
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const {
+        message,
+        success,
+        program
+    } = await benchmark(value);
+    console.log(program);
+    if (success) {
+        window.history.pushState("", "", '/p/'+program.hash);
+        output.innerHTML = `You entered:
+  <pre>${value}</pre>
+  The output was
+  <pre>${JSON.stringify(message)}</pre>
+  `;
+    } else {
+        output.innerHTML = `<p style="color:red;">${message}</p>`;
+    }
+}
+
+/**
+ * Runs `gofmt` on code.
+ * @param {string} code
+ * @returns {Promise<string>}
+ */
+async function fmt(code) {
+    const response = await fetch("/fmt", {
+        method: "POST",
+        mode: "cors",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            code
+        }),
+    });
+    return await response.json();
+}
+
+
+/**
+ * Runs `go test -bench=. --benchmem` on the code.
+ * @param {string} code
+ * @returns {Promise<object>}
+ */
+async function benchmark(code) {
+    const response = await fetch("/run", {
+        method: "POST",
+        mode: "cors",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            code
+        }),
+    });
+    return await response.json();
+}
+</script>
+</head>
+
+<body>
+  <div id="input-container">
+    <h1>Input</h1>
+    <form id="code-form">
+      <button type="submit" id="submit-button">submit</button>
+      <button type="button" id="gofmt-button">format</button>
+      <fieldset>
+        <legend>Code</legend>
+        <textarea id="code-input" name="code"></textarea>
+      </fieldset>
+    </form>
+  </div>
+  <div id="output-container">
+    <h1>Output</h1>
+    <div id="code-output">
+      submit code with
+      <code>Shift+Enter</code>
+      format code with
+      <code>Ctrl+Space</code>
+    </div>
+  </div>
+</body>
+
+</html>

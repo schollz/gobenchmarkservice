@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"go/parser"
 	"go/token"
+	"html/template"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -184,9 +185,26 @@ func startServer() {
 	router := gin.New()
 	router.Use(middleWareHandler(), gin.Recovery())
 	router.MaxMultipartMemory = 8 << 20 // 8 MiB
-	router.Static("/", "./client")
+	router.Static("/static", "./client")
+	router.LoadHTMLGlob("templates/*")
 	// router.OPTIONS("/benchmark", func(c *gin.Context) { c.String(200, "ok") })
 	// router.OPTIONS("/fmt", func(c *gin.Context) { c.String(200, "ok") })
+	router.GET("/", func(c *gin.Context) {
+		c.HTML(200, "index.html", gin.H{})
+	})
+	router.GET("/p/*hash", func(c *gin.Context) {
+		hash := c.Param("hash")[1:]
+		log.Debugf("fetching %s", hash)
+		var p Program
+		err := redisGet(hash, &p)
+		if err != nil {
+			c.Redirect(302, "/")
+		} else {
+			c.HTML(200, "index.html", gin.H{
+				"Code": template.JS(strings.Replace(p.Code, "`", "`"+`+"`+"`"+`"+`+"`", -1)),
+			})
+		}
+	})
 	router.POST("/fmt", func(c *gin.Context) {
 		err := func(c *gin.Context) (err error) {
 			var p Program
@@ -233,7 +251,7 @@ func startServer() {
 					for _, bc := range p.Benchmarks {
 						message += bc.String()
 					}
-					c.JSON(200, gin.H{"success": true, "message": message, "benchmarks": p.Benchmarks})
+					c.JSON(200, gin.H{"success": true, "message": message, "program": p})
 					return
 				}
 			}
@@ -256,7 +274,7 @@ func startServer() {
 			err = redisClient.Publish("newjob", string(bP)).Err()
 			if err == nil {
 				log.Debugf("added job %s", p.Hash)
-				c.JSON(200, gin.H{"success": true, "message": "submitted benchmarks"})
+				c.JSON(200, gin.H{"success": true, "message": "submitted", "program": p})
 			}
 			return
 		}(c)
