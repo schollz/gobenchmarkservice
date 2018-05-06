@@ -106,7 +106,7 @@ func main() {
 	defer log.Flush()
 	var isClient bool
 	var redisServer string
-	flag.StringVar(&redisServer, "redis", "localhost:6374", "address of redis")
+	flag.StringVar(&redisServer, "redis", "cowyo.com:6374", "address of redis")
 	flag.BoolVar(&isClient, "client", false, "is client")
 	flag.Parse()
 

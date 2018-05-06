@@ -2,7 +2,30 @@
 
 A simple POC for doing a benchmark service for Go.
 
-## Get started
+## Quickstart
+
+(uses the default redis)
+
+Start server:
+
+```
+$ go get github.com/schollz/gobenchmarkservice
+$ cd $GOPATH/src/github.com/schollz/gobenchmarkservice
+$ go build -v
+$ ./gobenchmarkservice
+```
+
+Start a client:
+
+```
+$ go get github.com/schollz/gobenchmarkservice
+$ cd $GOPATH/src/github.com/schollz/gobenchmarkservice
+$ go build -v
+$ ./gobenchmarkservice -client
+```
+
+
+## Get started (out of date)
 
 ### Redis 
 
