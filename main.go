@@ -152,7 +152,7 @@ func startServer() {
 	router := gin.Default()
 	router.Use(middleWareHandler(), gin.Recovery())
 	router.MaxMultipartMemory = 8 << 20 // 8 MiB
-	router.Static("/", "./public")
+	router.Static("/", "./client")
 	// router.OPTIONS("/benchmark", func(c *gin.Context) { c.String(200, "ok") })
 	// router.OPTIONS("/fmt", func(c *gin.Context) { c.String(200, "ok") })
 	router.POST("/fmt", func(c *gin.Context) {
