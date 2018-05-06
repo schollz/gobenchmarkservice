@@ -40,7 +40,7 @@ async function handleSubmit(e) {
   // TODO: use fetch below instead of this stub
   await new Promise(resolve => setTimeout(resolve, 1000));
   console.log(JSON.stringify({'code':document.getElementById("code-input").value}));
-const response = await fetch("http://localhost:8080/"+postRoute, {
+const response = await fetch("/"+postRoute, {
   method: "POST",
   mode: 'no-cors',
   headers: {
